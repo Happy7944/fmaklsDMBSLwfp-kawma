@@ -1,31 +1,37 @@
-// Vercel Serverless Function — Telegram API Proxy
-// Маршрут: /bot{token}/{method} → api.telegram.org/bot{token}/{method}
+// api/[...path].js
+// Handles: /bot{token}/{method} → api.telegram.org/bot{token}/{method}
 
-export default async function handler(req, res) {
-  const { path } = req.query;
-  const pathStr = Array.isArray(path) ? path.join("/") : path || "";
+module.exports = async function handler(req, res) {
+  const parts = req.query.path; // array: ["bot123:TOKEN", "sendMessage"]
+  const pathStr = Array.isArray(parts) ? parts.join("/") : String(parts || "");
 
-  // Healthcheck
   if (!pathStr.startsWith("bot")) {
+    res.setHeader("Content-Type", "text/plain");
     return res.status(200).send("Telegram API Proxy — OK");
   }
 
-  const tgUrl = `https://api.telegram.org/${pathStr}${
-    req.url.includes("?") ? "?" + req.url.split("?")[1] : ""
-  }`;
+  // Reconstruct query string (excluding Vercel's internal "path" param)
+  const qs = Object.entries(req.query)
+    .filter(([k]) => k !== "path")
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join("&");
+
+  const tgUrl = `https://api.telegram.org/${pathStr}${qs ? "?" + qs : ""}`;
 
   try {
     const fetchOptions = {
-      method: req.method,
+      method: req.method || "POST",
       headers: { "Content-Type": "application/json" },
     };
 
     if (req.method !== "GET" && req.body) {
-      fetchOptions.body = JSON.stringify(req.body);
+      fetchOptions.body = typeof req.body === "string"
+        ? req.body
+        : JSON.stringify(req.body);
     }
 
     const tgRes = await fetch(tgUrl, fetchOptions);
-    const data  = await tgRes.json();
+    const data = await tgRes.json();
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
@@ -33,4 +39,4 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
-}
+};
